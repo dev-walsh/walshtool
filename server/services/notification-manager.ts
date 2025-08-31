@@ -31,14 +31,14 @@ class NotificationManager {
       conditions: { enabled: true },
       channels: { telegram: true, web: true }
     });
-    
+
     this.rules.set('trades', {
       id: 'trades',
       type: 'trade',
       conditions: { enabled: true },
       channels: { telegram: true, web: true }
     });
-    
+
     this.rules.set('risk', {
       id: 'risk',
       type: 'risk',
@@ -49,7 +49,7 @@ class NotificationManager {
 
   async sendNotification(type: string, message: string, data?: any, level: string = 'INFO') {
     const rule = this.rules.get(type);
-    
+
     if (!rule || !rule.conditions.enabled) {
       console.log(`Notification rule disabled for type: ${type}`);
       return;
@@ -58,7 +58,7 @@ class NotificationManager {
     // Send to Telegram if configured and connected
     if (rule.channels.telegram && telegramBot.isConnected()) {
       try {
-        await telegramBot.sendAlert({ 
+        await telegramBot.sendAlert({
           level: level.toUpperCase(),
           title: type.charAt(0).toUpperCase() + type.slice(1),
           message,
@@ -97,7 +97,7 @@ class NotificationManager {
   async sendTradeNotification(action: string, symbol: string, details: any) {
     const message = `📊 ${action.toUpperCase()}: ${symbol} - Size: ${details.size || 'N/A'}, Price: ${details.price || 'N/A'}`;
     await this.sendNotification('trades', message, { action, symbol, details }, 'INFO');
-    
+
     // Also send via Telegram bot's trade notification method
     if (telegramBot.isConnected()) {
       try {

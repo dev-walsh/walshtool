@@ -103,14 +103,15 @@ class CTraderIntegration {
 
       // For demo purposes, return mock data
       // In real implementation, call the actual API
-      const mockAccount: CTraderAccountInfo = {
+      const mockAccount: CTraderAccountInfo & { isDemoMode: boolean } = {
         accountId: this.credentials?.login || 'demo_account',
         balance: 10000,
         equity: 10000,
         margin: 0,
         freeMargin: 10000,
         currency: 'USD',
-        leverage: 100
+        leverage: 100,
+        isDemoMode: this.isDemoMode()
       };
 
       return { success: true, account: mockAccount };

@@ -47,8 +47,8 @@ export function AITradingStatus() {
           
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Account Mode</span>
-            <Badge variant="secondary">
-              Demo
+            <Badge variant={ctraderAccount?.isDemoMode !== false ? "secondary" : "destructive"}>
+              {ctraderAccount?.isDemoMode !== false ? "Demo" : "Live"}
             </Badge>
           </div>
           
