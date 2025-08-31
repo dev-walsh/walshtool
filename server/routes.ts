@@ -321,7 +321,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { ctraderIntegration } = await import("./services/ctrader-integration");
       const ctraderAccounts = ctraderIntegration.getAllAccounts();
-      
+
       const accounts = ctraderAccounts
         .filter(acc => acc.connected && acc.info)
         .map(acc => ({
@@ -419,9 +419,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { accountId } = req.params;
       const { ctraderIntegration } = await import("./services/ctrader-integration");
-      
+
       const success = await ctraderIntegration.removeAccount(accountId);
-      
+
       if (success) {
         res.json({ success: true, message: "Account removed successfully" });
       } else {
@@ -441,7 +441,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { accountId } = req.query;
       const { ctraderIntegration } = await import("./services/ctrader-integration");
-      
+
       if (!ctraderIntegration.hasConnectedAccounts()) {
         return res.status(400).json({ 
           success: false, 
@@ -450,7 +450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const accountInfo = await ctraderIntegration.getAccountInfo(accountId as string);
-      
+
       if (accountInfo.success) {
         res.json(accountInfo.account);
       } else {
@@ -494,25 +494,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/brokers/mt5/login", async (req, res) => {
+  // Add MT5 connection endpoint
+  app.post("/api/brokers/mt5/connect", async (req, res) => {
     try {
       const { login, password, server } = req.body;
 
       if (!login || !password || !server) {
-        return res.status(400).json({ error: "Login, password, and server are required for MT5 login" });
+        return res.status(400).json({ 
+          success: false, 
+          error: "Login, password, and server are required" 
+        });
       }
 
-      // Attempt to log in to the MT5 server
-      const loginResult = await mt5Integration.loginUser(login, password, server);
+      const { mt5Integration } = await import("./services/mt5-integration");
+      const result = await mt5Integration.connectWithCredentials(login, password, server);
 
-      if (loginResult.success) {
-        res.json({ success: true, message: "Logged in to MT5 server successfully", data: loginResult.data });
+      if (result) {
+        const accountInfo = await mt5Integration.getAccountInfo();
+        res.json({ 
+          success: true, 
+          message: "Successfully connected to MT5",
+          account: accountInfo.account
+        });
       } else {
-        res.status(401).json({ success: false, error: "MT5 login failed", details: loginResult.error });
+        res.status(400).json({ success: false, error: "Failed to connect to MT5" });
       }
     } catch (error) {
-      console.error("MT5 Login Error:", error);
-      res.status(500).json({ error: error.message || "An unexpected error occurred during MT5 login" });
+      console.error("MT5 connection error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Connection failed" 
+      });
+    }
+  });
+
+  // MT5 Account Info API
+  app.get("/api/brokers/mt5/account", async (req, res) => {
+    try {
+      const { mt5Integration } = await import("./services/mt5-integration");
+
+      if (!mt5Integration.isConnected()) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "MT5 not connected" 
+        });
+      }
+
+      const accountInfo = await mt5Integration.getAccountInfo();
+
+      if (accountInfo.success) {
+        res.json(accountInfo.account);
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          error: accountInfo.error 
+        });
+      }
+    } catch (error) {
+      console.error("MT5 account info error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to get account info" 
+      });
+    }
+  });
+
+  // MT5 Positions API
+  app.get("/api/brokers/mt5/positions", async (req, res) => {
+    try {
+      const { mt5Integration } = await import("./services/mt5-integration");
+
+      if (!mt5Integration.isConnected()) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "MT5 not connected" 
+        });
+      }
+
+      const positions = await mt5Integration.getPositions();
+      res.json(positions);
+    } catch (error) {
+      console.error("MT5 positions error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to get positions" 
+      });
+    }
+  });
+
+  // MT5 Market Data API
+  app.get("/api/brokers/mt5/market/:symbol", async (req, res) => {
+    try {
+      const { symbol } = req.params;
+      const { mt5Integration } = await import("./services/mt5-integration");
+
+      if (!mt5Integration.isConnected()) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "MT5 not connected" 
+        });
+      }
+
+      const tickData = await mt5Integration.getTickData(symbol);
+      res.json(tickData);
+    } catch (error) {
+      console.error("MT5 market data error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to get market data" 
+      });
     }
   });
 

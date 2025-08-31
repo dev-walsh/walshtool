@@ -12,21 +12,30 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useState } from "react";
 import { type Account, type SystemStatus } from "@shared/schema";
+import { toast } from "@/components/ui/use-toast";
+import { Label } from "@/components/ui/label";
 
 const brokerFormSchema = z.object({
   brokerId: z.string().min(1, "Broker ID is required"),
-  login: z.string().min(1, "cTrader Login is required"),
-  password: z.string().min(1, "cTrader Password is required"),
-  server: z.string().min(1, "cTrader Server is required"),
+  login: z.string().min(1, "MT5 Login is required"),
+  password: z.string().min(1, "MT5 Password is required"),
+  server: z.string().min(1, "MT5 Server is required"),
   mode: z.enum(["live", "demo"]),
-  clientId: z.string().optional(),
-  clientSecret: z.string().optional(),
 });
 
 type BrokerFormData = z.infer<typeof brokerFormSchema>;
 
 export default function Brokers() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [accountInfo, setAccountInfo] = useState<Account[]>([]);
+
+  const [connectionData, setConnectionData] = useState({
+    login: '',
+    password: '',
+    server: ''
+  });
 
   const { data: accounts, isLoading } = useQuery<Account[]>({
     queryKey: ["/api/accounts"],
@@ -50,21 +59,19 @@ export default function Brokers() {
   const form = useForm<BrokerFormData>({
     resolver: zodResolver(brokerFormSchema),
     defaultValues: {
-      brokerId: "ctrader",
+      brokerId: "mt5",
       login: "",
       password: "",
-      server: "Demo",
+      server: "",
       mode: "demo",
-      clientId: "",
-      clientSecret: "",
     },
   });
 
   const onSubmit = async (values: z.infer<typeof brokerFormSchema>) => {
     try {
-      console.log("Submitting cTrader connection with values:", values);
+      console.log("Submitting MT5 connection with values:", values);
 
-      const response = await fetch("/api/brokers/ctrader/connect", {
+      const response = await fetch("/api/brokers/mt5/connect", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -73,20 +80,19 @@ export default function Brokers() {
           login: values.login,
           password: values.password,
           server: values.server,
-          clientId: values.clientId,
-          clientSecret: values.clientSecret,
+          mode: values.mode,
         }),
       });
 
       const result = await response.json();
 
       if (response.ok && result.success) {
-        console.log("Successfully connected to cTrader");
+        console.log("Successfully connected to MT5");
         setIsCreateDialogOpen(false);
         // Refresh the page data
         window.location.reload();
       } else {
-        console.error("Failed to connect to cTrader:", result.error || result);
+        console.error("Failed to connect to MT5:", result.error || result);
         // You might want to show an error message to the user here
         alert(`Connection failed: ${result.error || 'Unknown error'}`);
       }
@@ -104,18 +110,49 @@ export default function Brokers() {
 
   const displayConnections = [
     {
-      name: "cTrader",
-      type: "cTrader Integration",
-      status: ctraderAccounts && ctraderAccounts.length > 0 ? "ONLINE" : "OFFLINE",
-      latency: ctraderAccounts && ctraderAccounts.length > 0 ? "15ms" : "--",
-      lastTick: ctraderAccounts && ctraderAccounts.length > 0 ? "Live" : "--",
-      accountCount: ctraderAccounts ? ctraderAccounts.filter(acc => acc.connected).length : 0,
-      totalBalance: ctraderAccounts ? ctraderAccounts
-        .filter(acc => acc.connected && acc.info)
-        .reduce((total, acc) => total + (acc.info?.balance || 0), 0) : 0,
-      currency: ctraderAccounts && ctraderAccounts.length > 0 && ctraderAccounts[0].info ? ctraderAccounts[0].info.currency : 'USD'
+      name: "MT5",
+      type: "MT5 Integration",
+      status: "ONLINE", // Placeholder, will be updated by fetchAccountInfo
+      latency: "15ms", // Placeholder
+      lastTick: "Live", // Placeholder
+      accountCount: accountInfo.length,
+      totalBalance: accountInfo.reduce((total, acc) => total + (acc.balance || 0), 0),
+      currency: accountInfo.length > 0 ? accountInfo[0].currency : 'USD'
     }
   ];
+
+  const fetchAccountInfo = async () => {
+    try {
+      const response = await fetch('/api/brokers/mt5/account');
+      const account = await response.json();
+
+      if (account && account.login) {
+        setAccountInfo([{
+          id: account.login.toString(),
+          broker: 'MT5',
+          mode: 'LIVE', // Assuming live mode for fetched accounts
+          balance: account.balance,
+          equity: account.equity,
+          currency: account.currency,
+          status: 'Active' // Assuming active status for fetched accounts
+        }]);
+        setIsConnected(true); // Set connected state based on fetched account info
+      } else {
+        setIsConnected(false); // Ensure disconnected state if no account info
+        setAccountInfo([]); // Clear account info if no account found
+      }
+    } catch (error) {
+      console.error('Error fetching account info:', error);
+      setIsConnected(false); // Set disconnected state on error
+      setAccountInfo([]); // Clear account info on error
+    }
+  };
+
+  // Initial fetch for account info when component mounts
+  useState(() => {
+    fetchAccountInfo();
+  }, []);
+
 
   if (isLoading || isLoadingConnections) {
     return (
@@ -141,14 +178,18 @@ export default function Brokers() {
 
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
-              <Button data-testid="button-add-broker">
+              <Button data-testid="button-add-broker" onClick={() => {
+                form.reset(); // Reset form when opening dialog
+                setConnectionData({ login: '', password: '', server: '' }); // Reset local state as well
+                setIsCreateDialogOpen(true);
+              }}>
                 <i className="fas fa-plug mr-2"></i>
-                Connect cTrader
+                Connect MT5
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Connect to cTrader</DialogTitle>
+                <DialogTitle>Connect to MT5</DialogTitle>
               </DialogHeader>
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -161,11 +202,11 @@ export default function Brokers() {
                         <Select onValueChange={field.onChange} defaultValue={field.value} disabled>
                           <FormControl>
                             <SelectTrigger data-testid="select-broker">
-                              <SelectValue placeholder="cTrader" />
+                              <SelectValue placeholder="MT5" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="ctrader">cTrader</SelectItem>
+                            <SelectItem value="mt5">MT5</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -173,95 +214,37 @@ export default function Brokers() {
                     )}
                   />
 
-                  <FormField
-                    control={form.control}
-                    name="login"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>cTrader Login</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="Your cTrader login" 
-                            {...field} 
-                            data-testid="input-login"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>cTrader Password</FormLabel>
-                        <FormControl>
-                          <Input 
-                            type="password" 
-                            placeholder="Your cTrader password" 
-                            {...field} 
-                            data-testid="input-password"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="server"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>cTrader Server</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="e.g., Demo, Live, or specific server name" 
-                            {...field} 
-                            data-testid="input-server"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
                   <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="clientId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Client ID (Optional)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="OAuth Client ID" 
-                              {...field} 
-                              data-testid="input-client-id"
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="clientSecret"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Client Secret (Optional)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              type="password"
-                              placeholder="OAuth Client Secret" 
-                              {...field} 
-                              data-testid="input-client-secret"
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    <div>
+                      <Label htmlFor="login">Login/Account Number</Label>
+                      <Input
+                        id="login"
+                        type="text"
+                        placeholder="Enter MT5 account number"
+                        value={connectionData.login}
+                        onChange={(e) => setConnectionData(prev => ({ ...prev, login: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="password">Password</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="Enter MT5 password"
+                        value={connectionData.password}
+                        onChange={(e) => setConnectionData(prev => ({ ...prev, password: e.target.value }))}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Label htmlFor="server">Server</Label>
+                      <Input
+                        id="server"
+                        type="text"
+                        placeholder="e.g., MetaQuotes-Demo or your broker's server"
+                        value={connectionData.server}
+                        onChange={(e) => setConnectionData(prev => ({ ...prev, server: e.target.value }))}
+                      />
+                    </div>
                   </div>
 
                   <FormField
@@ -290,8 +273,8 @@ export default function Brokers() {
                     <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit" data-testid="button-submit-broker">
-                      Connect to cTrader
+                    <Button type="submit" data-testid="button-submit-broker" disabled={connecting}>
+                      {connecting ? "Connecting..." : "Connect to MT5"}
                     </Button>
                   </div>
                 </form>
@@ -308,9 +291,7 @@ export default function Brokers() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div className={`w-3 h-3 rounded-full ${
-                      broker.status === "ONLINE" ? "status-online" :
-                      broker.status === "WARNING" ? "status-warning" :
-                      "status-offline"
+                      isConnected ? "status-online" : "status-offline" // Use isConnected state
                     }`}></div>
                     <div>
                       <CardTitle data-testid={`broker-name-${index}`}>{broker.name}</CardTitle>
@@ -320,8 +301,8 @@ export default function Brokers() {
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
-                    {getStatusBadge(broker.status)}
-                    <Button variant="outline" size="sm" data-testid={`button-test-connection-${index}`}>
+                    {getStatusBadge(isConnected ? "ONLINE" : "OFFLINE")}
+                    <Button variant="outline" size="sm" data-testid={`button-test-connection-${index}`} onClick={fetchAccountInfo} disabled={connecting}>
                       <i className="fas fa-plug mr-2"></i>
                       Test Connection
                     </Button>
@@ -339,7 +320,7 @@ export default function Brokers() {
                   <div>
                     <p className="text-sm text-muted-foreground">Total Balance</p>
                     <p className="font-mono" data-testid={`broker-balance-${index}`}>
-                      {broker.accountCount > 0 
+                      {broker.accountCount > 0
                         ? `$${broker.totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${broker.currency}`
                         : "--"
                       }
@@ -357,28 +338,8 @@ export default function Brokers() {
                   </div>
                 </div>
 
-                {broker.status === "WARNING" && (
-                  <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <i className="fas fa-exclamation-triangle text-warning"></i>
-                      <p className="text-sm">Experiencing intermittent connection issues. Auto-reconnecting...</p>
-                    </div>
-                  </div>
-                )}
+                {/* Removed warning and offline specific messages as we are now using general connection status */}
 
-                {broker.status === "OFFLINE" && (
-                  <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <i className="fas fa-times-circle text-destructive"></i>
-                        <p className="text-sm">Connection failed. Check credentials and network.</p>
-                      </div>
-                      <Button variant="outline" size="sm" data-testid={`button-reconnect-${index}`}>
-                        Reconnect
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </CardContent>
             </Card>
           ))}
@@ -404,13 +365,13 @@ export default function Brokers() {
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {accounts && accounts.length > 0 ? accounts.map((account: any, index: number) => (
+                  {accountInfo && accountInfo.length > 0 ? accountInfo.map((account: any, index: number) => (
                     <tr key={account.id} className="border-b border-border" data-testid={`account-row-${index}`}>
                       <td className="p-4 font-mono" data-testid={`account-number-${index}`}>
-                        {account.accountNumber}
+                        {account.id} {/* Use account.id which is the login number */}
                       </td>
                       <td className="p-4" data-testid={`account-broker-${index}`}>
-                        {account.brokerName || account.brokerId.toUpperCase()}
+                        {account.broker}
                       </td>
                       <td className="p-4">
                         <Badge variant="secondary" data-testid={`account-mode-${index}`}>
@@ -424,25 +385,20 @@ export default function Brokers() {
                         ${parseFloat(account.equity).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-4" data-testid={`account-currency-${index}`}>
-                        {account.baseCurrency}
+                        {account.currency}
                       </td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">
-                          <Badge variant={account.isActive ? "default" : "secondary"} data-testid={`account-status-${index}`}>
-                            {account.isActive ? "Active" : "Inactive"}
+                          <Badge variant={account.status === "Active" ? "default" : "secondary"} data-testid={`account-status-${index}`}>
+                            {account.status}
                           </Badge>
-                          {account.leverage && (
-                            <span className="text-xs text-muted-foreground">
-                              1:{account.leverage}
-                            </span>
-                          )}
                         </div>
                       </td>
                     </tr>
                   )) : (
                     <tr>
                       <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                        No cTrader accounts connected. Use the "Connect cTrader" button above to add your accounts.
+                        No MT5 accounts connected. Use the "Connect MT5" button above to add your account.
                       </td>
                     </tr>
                   )}
