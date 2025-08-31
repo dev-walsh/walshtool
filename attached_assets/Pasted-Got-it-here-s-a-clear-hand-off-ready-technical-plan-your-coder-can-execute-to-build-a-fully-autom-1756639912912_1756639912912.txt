@@ -1,0 +1,252 @@
+Got it — here’s a clear, hand-off-ready technical plan your coder can execute to build a fully-automated forex trading bot and control panel, designed to work with funded prop accounts/brokers and standard retail brokers.
+
+# 1) Project Goals & Non-Goals
+
+**Goals**
+
+* Autonomous FX trading system with strict risk controls tailored for funded-account rules (daily loss, overall drawdown, max lot size, news blackout).
+* Web control panel to configure strategies, risk, schedules, and to audit all activity.
+* Backtesting + paper trading + live trading with seamless promotion between modes.
+* Broker-agnostic architecture with pluggable connectors (MT4/MT5 bridge, cTrader, OANDA, IBKR, etc.).
+* Full observability (logs, metrics, alerts) and robust fail-safes.
+
+**Non-Goals**
+
+* No discretionary trade UI (charting for analysis is fine; no manual order entry required unless requested).
+* No social-copy trading in v1.
+
+# 2) High-Level Architecture
+
+* **Strategy Engine (microservice)**
+  Generates signals, position sizing, and exits. Supports multiple strategies run in parallel and/or ensemble voting.
+* **Risk Manager (microservice, hard gate)**
+  Enforces account-level and firm-level constraints **before** any order reaches a broker. Handles kill-switch.
+* **Order Router / OMS (microservice)**
+  Normalized order schema → broker adapters; handles retries, idempotency, partial fills, slippage caps.
+* **Market Data Service**
+  Unified feed (historical + live). Caches OHLCV, ticks, economic calendar, spreads.
+* **Broker Adapters (plugins)**
+
+  * MT4/MT5 via local/remote bridge or manager API
+  * cTrader Open API
+  * OANDA v20 REST/streaming
+  * Interactive Brokers TWS/Gateway
+* **Control Panel (Web App)**
+  Admin UI for configs, deploys, risk knobs, status, backtests, and reports.
+* **Backtester & Simulator**
+  Event-driven, supports tick/1s/1m bars, variable spread/latency, slippage models, walk-forward.
+* **Storage**
+  PostgreSQL (configs, results, orders), Redis (caches/locks/queues), S3-compatible (backtests, logs, model artifacts).
+* **Observability**
+  Central logging, metrics, traces, alerting, plus audit trail (tamper-evident).
+
+# 3) Tech Stack
+
+* **Languages:** Python for strategies & services; TypeScript+Next.js (or React) for panel.
+* **APIs/Frameworks:** FastAPI (services), Pydantic (schemas), Celery/RQ (jobs), WebSockets (live telemetry).
+* **Data/Infra:** PostgreSQL, Redis, MinIO/S3, Docker + Docker Compose; optional Kubernetes later.
+* **Backtesting:** backtrader or vectorbt for speed; custom event engine for realistic fills.
+* **Indicators/ML:** TA-Lib / pandas-ta; scikit-learn/xgboost/lightgbm; optuna for parameter search.
+
+# 4) Broker & Prop-Firm Considerations
+
+Implement a **rules engine** configurable per account:
+
+* Max daily loss, max trailing/absolute drawdown
+* Max lot size per symbol and per order
+* Max exposure per symbol and portfolio
+* Trading time windows (e.g., no high-impact news)
+* Min SL/TP distance and required hard stop on entry
+* Equity guardrails (auto-reduce size or flat positions)
+* “Evaluation/Challenge” modes with stricter limits and daily reset logic
+
+# 5) Data Inputs
+
+* **Live quotes & tick bars** (primary + fallback feed)
+* **Historical OHLCV** (tick→bars aggregation)
+* **Spreads & commissions** (symbol-specific)
+* **Economic calendar** (high-impact events with buffer windows)
+* **News blackout flags** per strategy
+
+# 6) Strategy Engine (v1 Strategy Pack)
+
+Ship with a small, robust library so the system is useful day one:
+
+1. **Breakout with Volatility Filter**
+   Donchian/ATR, session-aware, fixed fractional risk.
+2. **Mean Reversion in Ranges**
+   RSI/Bollinger with regime filter (ADX/ATR).
+3. **Trend-Follow (Pullback)**
+   EMA stack + structure break; partial take-profits.
+4. **News-Avoidant Scalper (Optional)**
+   Spread and latency aware; disabled around events.
+
+Each strategy exposes:
+
+* `get_universe()`, `on_bar()`, `on_tick()`, `position_size()`, `risk_params`, `max_open_positions`.
+* YAML/JSON config; hot-reloadable.
+
+# 7) Risk Manager (Hard Gate)
+
+* Pre-trade checks: daily loss, drawdown, per-trade risk %, min R\:R, leverage caps, news window, max slippage, max spread.
+* Runtime monitors: equity DD, open risk, margin usage, broker rejects, latency spike.
+* Actions: block order, reduce size, auto-flatten, global kill-switch, account pause until next session.
+* Persistence: every decision is logged with reason code.
+
+# 8) Order Router / OMS
+
+* Normalized order schema: `MARKET`, `LIMIT`, `STOP`, `STOP_LIMIT`; GTC/IOC; SL/TP attached (server-side where supported).
+* Idempotency keys to avoid duplicates.
+* Retry policy with exponential backoff; detect rejects/partial fills; reconciler process.
+* Slippage guard: cancel/replace if price deviation > configured ticks.
+* Heartbeats & connectivity watchdog per broker adapter.
+
+# 9) Backtesting & Paper Trading
+
+* **Execution model:** last/next tick, queue-based fills, variable latency, realistic spread & commissions per symbol and time of day.
+* **Walk-forward & OOS split:** rolling windows; report stability (> Sharpe decay, MAR, hit rate).
+* **Metrics:** CAGR, Sharpe, Sortino, max DD, avg trade, exposure, skew/kurtosis, risk of ruin, tail metrics.
+* **Parameter search:** Optuna with constraints (turn off overfit via nested CV).
+* **Paper mode:** uses live feed + simulated fills; mirrors OMS API.
+
+# 10) Control Panel (Web)
+
+**Pages**
+
+* Dashboard (account equity, open PnL, risk status, per-strategy KPIs)
+* Strategies (add/edit/enable, parameters, versions, backtest runs)
+* Risk & Rules (daily loss, drawdown, lot limits, schedule, news filters)
+* Brokers & Accounts (connect, test latency, symbol maps, leverage)
+* Backtests (create/run, compare, promote to paper/live)
+* Logs & Alerts (telegram/email/webhook integration)
+* Audit Trail (who changed what, when; diff view)
+* Settings & Secrets (environment + KMS)
+
+**Nice-to-haves**
+
+* Live charts (price + positions/SL/TP overlays)
+* Equity curve with regime shading
+* Heatmap by symbol/session
+
+# 11) API Design (extract)
+
+All JSON; JWT auth (panel), mTLS (service-to-service).
+
+* `POST /strategies` create; `PATCH /strategies/{id}` update/hot-reload
+* `POST /runs/backtest` start; `GET /runs/{id}` status/results
+* `POST /trade/sim` simulate single order through Risk+OMS (for testing)
+* `POST /live/start|stop` per strategy or account
+* `GET /risk/state` current limits, headroom
+* `POST /broker/{id}/test` ping, symbol map, margin check
+* `GET /telemetry/*` websocket streams for quotes, PnL, positions
+
+# 12) Data Model (selected tables)
+
+**accounts**: id, broker, account\_number, mode(live/paper/backtest), base\_ccy, leverage, prop\_rules(jsonb)
+**strategies**: id, name, version, params(jsonb), enabled, risk\_profile
+**orders**: id, account\_id, strategy\_id, symbol, side, qty, type, price, sl, tp, status, broker\_order\_id, idempotency\_key, timestamps
+**fills**: order\_id, fill\_id, qty, price, commission, slippage, ts
+**positions**: account\_id, symbol, qty, avg\_price, uPnL, realizedPnL
+**risk\_events**: id, account\_id, rule, level, action, details(jsonb), ts
+**backtests**: id, strategy\_id, data\_range, params, metrics(jsonb), artifact\_uri
+**telemetry\_ticks/bars**: symbol, ts, ohlcv, spread
+**audit\_log**: actor, change, before/after, ts, signature
+
+# 13) Security & Compliance
+
+* Secrets in vault/KMS; no secrets in code or panel exports.
+* mTLS between services; per-account API keys segregated.
+* Principle of least privilege IAM.
+* Tamper-evident audit log (hash chain).
+* Read-only “viewer” role for reports; admin only for live toggles.
+* IP allow-lists for broker bridges when possible.
+
+# 14) Reliability & Fail-safes
+
+* Process supervisors + health checks; self-healing containers.
+* Persistence of latest SL/TP server-side at broker where supported.
+* On crash/restart: re-hydrate state from broker (positions, orders).
+* Network partitions: go-flat option; stale-data detector halts entries.
+* Dual-feed market data with automatic failover.
+* Kill-switch endpoints and physical “panic” CLI.
+
+# 15) Performance Targets
+
+* Tick-to-decision latency: <50–150 ms (local) for scalpers; <500 ms for swing.
+* OMS submit→broker ACK: tracked and alerted if P95 above target.
+* Backtest throughput: ≥ 1 year of 1-min bars per symbol per minute (baseline) on commodity hardware.
+
+# 16) Deliverables Checklist
+
+* [ ] Dockerized services (Strategy, Risk, OMS, Data, Panel)
+* [ ] Broker adapters (implement at least two: e.g., MT5 bridge + OANDA)
+* [ ] Configurable rules engine for prop constraints
+* [ ] Backtesting engine + walk-forward + reports
+* [ ] Paper trading mode identical to live path
+* [ ] Control panel with auth, RBAC, audit, alerts
+* [ ] Observability: logs, metrics, dashboards, alert rules
+* [ ] CI/CD pipelines (lint, type-check, tests, container builds, deploy to staging/prod)
+* [ ] Full documentation + runbooks + sample configs
+
+# 17) Setup & Environment
+
+**Env Vars (example)**
+
+```
+DATABASE_URL=postgres://...
+REDIS_URL=redis://...
+S3_ENDPOINT=...
+BROKER_MT5_HOST=...
+BROKER_MT5_LOGIN=...
+BROKER_MT5_PASSWORD=...
+OANDA_API_KEY=...
+ECON_CALENDAR_KEY=...
+JWT_SECRET=...
+```
+
+**Local Dev**: `docker compose up` → seeds demo data, mock feed, and paper account.
+**Staging**: real data feed + paper accounts.
+**Prod**: live accounts only, restricted access, 2FA for panel.
+
+# 18) Testing Plan
+
+* Unit tests: strategies, risk checks, OMS idempotency.
+* Integration tests: full trade flow with mock broker; chaos tests (latency, rejects).
+* Backtest reproducibility: fixed seeds; metadata capture.
+* End-to-end drills: news blackout, daily loss breach, connection drop, broker reject loops.
+* Security tests: secrets scanning, authZ, rate limits.
+
+# 19) Reporting & Analytics
+
+* Equity curve, DD profile, monthly returns
+* Trade distribution (R multiple, duration)
+* Session/day-of-week performance
+* Slippage & spread impact analysis
+* Live vs backtest drift monitor
+
+# 20) Roadmap Ideas (Post-v1)
+
+* Portfolio-level optimizer (Kelly-capped, CVaR-aware)
+* Regime detection (HMM or ML classifier)
+* Latency-aware execution (smart limit/iceberg behavior)
+* Multi-prop account orchestration with risk allocation
+
+# 21) Legal/Operational Notes
+
+* Ensure this is used in accordance with prop-firm and broker T\&Cs.
+* This is an **automation tool**, not financial advice.
+* Operator must monitor live systems and maintain sufficient connectivity and capital for margin.
+
+---
+
+## What your coder should start with (first implementation slice)
+
+1. Spin up the **skeleton services** (FastAPI + Docker + Postgres + Redis).
+2. Implement **normalized order schema** + **OMS** with a **Paper Broker** adapter.
+3. Build **Risk Manager** with daily loss/drawdown/lot limits and a **kill-switch**.
+4. Create **Backtester** (bars first) and one **reference strategy** (Breakout).
+5. Build **Control Panel** pages: Dashboard, Strategies, Risk, Backtests, Brokers.
+6. Add **observability** (structured logs + metrics + alerts).
+7. Integrate a **real broker** (MT5 bridge or OANDA) and run end-to-end in demo.
+
+If you’d like, I can turn this into a starter repo structure (folders, base code, and sample configs) or tailor it to specific brokers/prop firms you already use.
