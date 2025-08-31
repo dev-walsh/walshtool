@@ -11,3 +11,15 @@ run = ["sh", "-c", "npm run dev"]
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[workflows]
+runButton = "Run Trading Bot & Panel"
+
+[[workflows.workflow]]
+name = "Run Trading Bot & Panel"
+author = 47099456
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
