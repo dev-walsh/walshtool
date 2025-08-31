@@ -582,6 +582,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // MT5 Remote Configuration API
+  app.post("/api/brokers/mt5/configure-remote", async (req, res) => {
+    try {
+      const { mt5Integration } = await import("./services/mt5-integration");
+      const { host, port } = req.body;
+
+      if (!host || !port) {
+        return res.status(400).json({
+          success: false,
+          error: "Host and port are required"
+        });
+      }
+
+      const connected = await mt5Integration.configureRemoteConnection(host, port);
+      
+      res.json({
+        success: connected,
+        message: connected ? "Remote MT5 configured successfully" : "Failed to connect to remote MT5",
+        config: mt5Integration.getRemoteConfig()
+      });
+    } catch (error) {
+      console.error("MT5 remote config error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to configure remote MT5"
+      });
+    }
+  });
+
+  // MT5 Connection Status API
+  app.get("/api/brokers/mt5/status", async (req, res) => {
+    try {
+      const { mt5Integration } = await import("./services/mt5-integration");
+      
+      res.json({
+        isConnected: mt5Integration.isConnected(),
+        isRemote: mt5Integration.isUsingRemoteConnection(),
+        remoteConfig: mt5Integration.getRemoteConfig()
+      });
+    } catch (error) {
+      console.error("MT5 status error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to get MT5 status"
+      });
+    }
+  });
+
+  // MT5 Bridge Download API
+  app.get("/api/brokers/mt5/download-bridge", async (req, res) => {
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+      
+      const bridgeFilePath = path.join(process.cwd(), "mt5_bridge_server.py");
+      
+      if (!fs.existsSync(bridgeFilePath)) {
+        return res.status(404).json({
+          success: false,
+          error: "MT5 bridge server file not found"
+        });
+      }
+
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', 'attachment; filename="mt5_bridge_server.py"');
+      
+      const fileStream = fs.createReadStream(bridgeFilePath);
+      fileStream.pipe(res);
+    } catch (error) {
+      console.error("MT5 bridge download error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to download MT5 bridge file"
+      });
+    }
+  });
+
+  // MT5 Remote Configuration API
+  app.post("/api/brokers/mt5/configure-remote", async (req, res) => {
+    try {
+      const { host, port } = req.body;
+      
+      if (!host || !port) {
+        return res.status(400).json({
+          success: false,
+          error: "Host and port are required"
+        });
+      }
+
+      const { mt5Integration } = await import("./services/mt5-integration");
+      const success = await mt5Integration.configureRemoteConnection(host, parseInt(port));
+      
+      res.json({
+        success,
+        message: success ? "Remote connection configured successfully" : "Failed to configure remote connection"
+      });
+    } catch (error) {
+      console.error("MT5 remote config error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to configure remote connection"
+      });
+    }
+  });
+
   // MT5 Market Data API
   app.get("/api/brokers/mt5/market/:symbol", async (req, res) => {
     try {

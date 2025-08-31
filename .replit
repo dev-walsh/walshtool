@@ -13,12 +13,25 @@ localPort = 5000
 externalPort = 80
 
 [workflows]
-runButton = "Run Trading Bot & Panel"
+runButton = "Install and Run"
 
 [[workflows.workflow]]
 name = "Run Trading Bot & Panel"
 author = 47099456
 mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Install and Run"
+author = 47100113
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm install"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"

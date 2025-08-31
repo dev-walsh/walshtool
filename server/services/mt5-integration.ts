@@ -2,6 +2,7 @@
 import { spawn } from 'child_process';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import WebSocket from 'ws';
 
 interface MT5MarketData {
   symbol: string;
@@ -35,18 +36,39 @@ interface MT5Order {
   comment: string;
 }
 
+interface RemoteConfig {
+  host: string;
+  port: number;
+  enabled: boolean;
+}
+
 class MT5Integration {
   private pythonPath = 'python';
   private isConnected = false;
   private isDemoAccount = true;
   private pythonAvailable = false;
+  private remoteConfig: RemoteConfig | null = null;
+  private ws: WebSocket | null = null;
+  private connectionPromise: Promise<any> | null = null;
 
   async initialize(): Promise<boolean> {
     try {
-      // Check if Python is available
+      // Check for remote configuration first
+      const remoteConfigPath = join(process.cwd(), 'mt5-remote-config.json');
+      if (existsSync(remoteConfigPath)) {
+        const configData = readFileSync(remoteConfigPath, 'utf8');
+        this.remoteConfig = JSON.parse(configData);
+        
+        if (this.remoteConfig?.enabled) {
+          console.log(`Attempting to connect to remote MT5 at ${this.remoteConfig.host}:${this.remoteConfig.port}`);
+          return await this.connectRemote();
+        }
+      }
+
+      // Fallback to local Python if no remote config
       this.pythonAvailable = await this.checkPythonAvailability();
       if (!this.pythonAvailable) {
-        console.error('Python3 is not available. MT5 integration requires Python3 with MetaTrader5 package.');
+        console.error('Python3 is not available and no remote MT5 configured. Please set up remote MT5 connection or install Python3 with MetaTrader5 package.');
         return false;
       }
 
@@ -63,6 +85,199 @@ class MT5Integration {
       console.error('MT5 initialization error:', error);
       return false;
     }
+  }
+
+  private async connectRemote(retryCount = 0): Promise<boolean> {
+    if (!this.remoteConfig) return false;
+
+    const maxRetries = 3;
+    const retryDelay = 2000; // 2 seconds between retries
+    const connectionTimeout = 15000; // 15 seconds timeout
+
+    return new Promise((resolve) => {
+      try {
+        const wsUrl = `ws://${this.remoteConfig!.host}:${this.remoteConfig!.port}`;
+        console.log(`Attempting to connect to remote MT5 at ${wsUrl} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+        
+        this.ws = new WebSocket(wsUrl, {
+          handshakeTimeout: connectionTimeout,
+          perMessageDeflate: false
+        });
+
+        let connectionResolved = false;
+
+        const resolveConnection = (success: boolean) => {
+          if (connectionResolved) return;
+          connectionResolved = true;
+          resolve(success);
+        };
+
+        this.ws.on('open', () => {
+          console.log('Successfully connected to remote MT5 server');
+          this.isConnected = true;
+          resolveConnection(true);
+        });
+
+        this.ws.on('error', (error) => {
+          console.error(`Remote MT5 connection error (attempt ${retryCount + 1}):`, error.message);
+          this.isConnected = false;
+          
+          if (!connectionResolved) {
+            if (retryCount < maxRetries) {
+              console.log(`Retrying connection in ${retryDelay}ms...`);
+              setTimeout(async () => {
+                const retryResult = await this.connectRemote(retryCount + 1);
+                resolveConnection(retryResult);
+              }, retryDelay);
+            } else {
+              console.error('All connection attempts failed');
+              resolveConnection(false);
+            }
+          }
+        });
+
+        this.ws.on('close', (code, reason) => {
+          console.log(`Remote MT5 connection closed (code: ${code}, reason: ${reason})`);
+          this.isConnected = false;
+          
+          if (!connectionResolved) {
+            if (retryCount < maxRetries) {
+              console.log(`Connection closed, retrying in ${retryDelay}ms...`);
+              setTimeout(async () => {
+                const retryResult = await this.connectRemote(retryCount + 1);
+                resolveConnection(retryResult);
+              }, retryDelay);
+            } else {
+              resolveConnection(false);
+            }
+          }
+        });
+
+        // Timeout after specified duration
+        setTimeout(() => {
+          if (!connectionResolved) {
+            console.error(`Connection timeout after ${connectionTimeout}ms`);
+            this.ws?.close();
+            
+            if (retryCount < maxRetries) {
+              console.log(`Timeout occurred, retrying in ${retryDelay}ms...`);
+              setTimeout(async () => {
+                const retryResult = await this.connectRemote(retryCount + 1);
+                resolveConnection(retryResult);
+              }, retryDelay);
+            } else {
+              resolveConnection(false);
+            }
+          }
+        }, connectionTimeout);
+
+      } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        if (retryCount < maxRetries) {
+          setTimeout(async () => {
+            const retryResult = await this.connectRemote(retryCount + 1);
+            resolve(retryResult);
+          }, retryDelay);
+        } else {
+          resolve(false);
+        }
+      }
+    });
+  }
+
+  private async sendRemoteCommand(command: string, ...args: any[]): Promise<any> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      // Try to reconnect if connection is lost
+      if (this.remoteConfig?.enabled) {
+        console.log('Connection lost, attempting to reconnect...');
+        const reconnected = await this.connectRemote();
+        if (!reconnected) {
+          throw new Error('Remote MT5 connection not available and reconnection failed');
+        }
+      } else {
+        throw new Error('Remote MT5 connection not available');
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const requestId = Date.now().toString();
+      const message = {
+        id: requestId,
+        command,
+        args
+      };
+
+      const timeout = setTimeout(() => {
+        this.ws?.off('message', handleMessage);
+        reject(new Error(`Remote command timeout for ${command}`));
+      }, 30000);
+
+      const handleMessage = (data: Buffer) => {
+        try {
+          const response = JSON.parse(data.toString());
+          if (response.id === requestId) {
+            clearTimeout(timeout);
+            this.ws?.off('message', handleMessage);
+            
+            if (response.success === false) {
+              reject(new Error(response.error || 'Remote command failed'));
+            } else {
+              resolve(response.result || response);
+            }
+          }
+        } catch (error) {
+          // Ignore parse errors for other messages
+        }
+      };
+
+      this.ws.on('message', handleMessage);
+      
+      try {
+        this.ws.send(JSON.stringify(message));
+      } catch (error) {
+        clearTimeout(timeout);
+        this.ws?.off('message', handleMessage);
+        reject(new Error(`Failed to send command: ${error.message}`));
+      }
+    });
+  }
+
+  async configureRemoteConnection(host: string, port: number): Promise<boolean> {
+    const config: RemoteConfig = {
+      host,
+      port,
+      enabled: true
+    };
+
+    // Save configuration
+    const configPath = join(process.cwd(), 'mt5-remote-config.json');
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+    
+    this.remoteConfig = config;
+
+    // Test connection with validation
+    console.log(`Testing connection to ${host}:${port}...`);
+    const connected = await this.connectRemote();
+    
+    if (connected) {
+      console.log(`Remote MT5 connection configured successfully for ${host}:${port}`);
+      // Test a simple command to verify the connection works
+      try {
+        await this.sendRemoteCommand('test_connection');
+        console.log('Remote MT5 bridge server is responding correctly');
+      } catch (error) {
+        console.warn('Connection established but bridge server may not be functioning properly:', error.message);
+      }
+    } else {
+      console.error(`Failed to connect to remote MT5 at ${host}:${port}`);
+      console.error('Please ensure:');
+      console.error('1. MT5 Bridge Server is running on the remote machine');
+      console.error('2. Port forwarding is configured correctly');
+      console.error('3. Firewall allows connections on the specified port');
+      console.error('4. The host address and port are correct');
+    }
+
+    return connected;
   }
 
   private async checkPythonAvailability(): Promise<boolean> {
@@ -82,7 +297,15 @@ class MT5Integration {
 
   async connectWithCredentials(login: string, password: string, server: string): Promise<boolean> {
     try {
-      // Check if Python is available
+      // Use remote connection if available
+      if (this.remoteConfig?.enabled && this.ws) {
+        const result = await this.sendRemoteCommand('connect_with_credentials', login, password, server);
+        this.isConnected = result.success;
+        console.log(`Remote MT5 Integration ${this.isConnected ? 'connected' : 'failed to connect'} to server: ${server}`);
+        return this.isConnected;
+      }
+
+      // Fallback to local Python
       if (!this.pythonAvailable) {
         this.pythonAvailable = await this.checkPythonAvailability();
         if (!this.pythonAvailable) {
@@ -90,10 +313,7 @@ class MT5Integration {
         }
       }
 
-      // Create Python script for MT5 operations if not already created
       this.createMT5PythonScript();
-      
-      // Test connection with credentials
       const result = await this.executePythonCommand('connect_with_credentials', login, password, server);
       this.isConnected = result.success;
       
@@ -427,6 +647,12 @@ if __name__ == "__main__":
   }
 
   private async executePythonCommand(command: string, ...args: string[]): Promise<any> {
+    // Use remote connection if available
+    if (this.remoteConfig?.enabled && this.ws) {
+      return await this.sendRemoteCommand(command, ...args);
+    }
+
+    // Fallback to local Python execution
     return new Promise((resolve) => {
       const pythonArgs = [join(process.cwd(), 'mt5_bridge.py'), command, ...args];
       const pythonProcess = spawn(this.pythonPath, pythonArgs);
@@ -508,8 +734,12 @@ if __name__ == "__main__":
 
   async disconnect(): Promise<boolean> {
     try {
-      // Shutdown MT5 connection
-      await this.executePythonCommand('shutdown');
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+      } else {
+        await this.executePythonCommand('shutdown');
+      }
       this.isConnected = false;
       console.log('MT5 disconnected');
       return true;
@@ -545,6 +775,14 @@ if __name__ == "__main__":
 
   isDemoMode(): boolean {
     return this.isDemoAccount;
+  }
+
+  getRemoteConfig(): RemoteConfig | null {
+    return this.remoteConfig;
+  }
+
+  isUsingRemoteConnection(): boolean {
+    return this.remoteConfig?.enabled === true && this.ws?.readyState === WebSocket.OPEN;
   }
 }
 

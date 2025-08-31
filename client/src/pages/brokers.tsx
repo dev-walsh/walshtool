@@ -12,7 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useState } from "react";
 import { type Account, type SystemStatus } from "@shared/schema";
-import { toast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { Label } from "@/components/ui/label";
 
 const brokerFormSchema = z.object({
@@ -26,16 +26,14 @@ const brokerFormSchema = z.object({
 type BrokerFormData = z.infer<typeof brokerFormSchema>;
 
 export default function Brokers() {
+  const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isRemoteConfigOpen, setIsRemoteConfigOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [accountInfo, setAccountInfo] = useState<Account[]>([]);
-
-  const [connectionData, setConnectionData] = useState({
-    login: '',
-    password: '',
-    server: ''
-  });
+  const [remoteHost, setRemoteHost] = useState("");
+  const [remotePort, setRemotePort] = useState("8765");
 
   const { data: accounts, isLoading } = useQuery<Account[]>({
     queryKey: ["/api/accounts"],
@@ -69,6 +67,7 @@ export default function Brokers() {
 
   const onSubmit = async (values: z.infer<typeof brokerFormSchema>) => {
     try {
+      setConnecting(true);
       console.log("Submitting MT5 connection with values:", values);
 
       const response = await fetch("/api/brokers/mt5/connect", {
@@ -88,17 +87,30 @@ export default function Brokers() {
 
       if (response.ok && result.success) {
         console.log("Successfully connected to MT5");
+        toast({
+          title: "Connection Successful",
+          description: "Successfully connected to MT5 broker.",
+        });
         setIsCreateDialogOpen(false);
-        // Refresh the page data
-        window.location.reload();
+        form.reset();
+        await fetchAccountInfo(); // Refresh account info
       } else {
         console.error("Failed to connect to MT5:", result.error || result);
-        // You might want to show an error message to the user here
-        alert(`Connection failed: ${result.error || 'Unknown error'}`);
+        toast({
+          title: "Connection Failed",
+          description: result.error || 'Failed to connect to MT5. Please check your credentials.',
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error("Connection error:", error);
-      alert(`Connection error: ${error.message || 'Network error'}`);
+      toast({
+        title: "Connection Error",
+        description: error.message || 'Network error occurred. Please try again.',
+        variant: "destructive",
+      });
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -153,6 +165,87 @@ export default function Brokers() {
     fetchAccountInfo();
   }, []);
 
+  const downloadMT5Bridge = async () => {
+    try {
+      const response = await fetch('/api/brokers/mt5/download-bridge');
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'mt5_bridge_server.py';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast({
+          title: "Download Started",
+          description: "MT5 Bridge Server file has been downloaded successfully.",
+        });
+      } else {
+        throw new Error('Failed to download file');
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download MT5 Bridge Server file. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const configureRemoteConnection = async () => {
+    try {
+      if (!remoteHost || !remotePort) {
+        toast({
+          title: "Invalid Input",
+          description: "Please enter both host and port.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setConnecting(true);
+      const response = await fetch('/api/brokers/mt5/configure-remote', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          host: remoteHost,
+          port: parseInt(remotePort),
+        }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        toast({
+          title: "Remote Connection Configured",
+          description: "Successfully configured remote MT5 connection. You can now test the connection.",
+        });
+        setIsRemoteConfigOpen(false);
+        await fetchAccountInfo(); // Test connection immediately
+      } else {
+        toast({
+          title: "Configuration Failed",
+          description: result.error || 'Failed to configure remote connection.',
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Remote config error:', error);
+      toast({
+        title: "Configuration Error",
+        description: "Network error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
 
   if (isLoading || isLoadingConnections) {
     return (
@@ -176,111 +269,186 @@ export default function Brokers() {
             <p className="text-muted-foreground">Monitor and configure your broker integrations</p>
           </div>
 
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button data-testid="button-add-broker" onClick={() => {
-                form.reset(); // Reset form when opening dialog
-                setConnectionData({ login: '', password: '', server: '' }); // Reset local state as well
-                setIsCreateDialogOpen(true);
-              }}>
-                <i className="fas fa-plug mr-2"></i>
-                Connect MT5
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Connect to MT5</DialogTitle>
-              </DialogHeader>
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="brokerId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Broker</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-broker">
-                              <SelectValue placeholder="MT5" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="mt5">MT5</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="login">Login/Account Number</Label>
-                      <Input
-                        id="login"
-                        type="text"
-                        placeholder="Enter MT5 account number"
-                        value={connectionData.login}
-                        onChange={(e) => setConnectionData(prev => ({ ...prev, login: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="password">Password</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="Enter MT5 password"
-                        value={connectionData.password}
-                        onChange={(e) => setConnectionData(prev => ({ ...prev, password: e.target.value }))}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <Label htmlFor="server">Server</Label>
-                      <Input
-                        id="server"
-                        type="text"
-                        placeholder="e.g., MetaQuotes-Demo or your broker's server"
-                        value={connectionData.server}
-                        onChange={(e) => setConnectionData(prev => ({ ...prev, server: e.target.value }))}
-                      />
-                    </div>
+          <div className="flex gap-2">
+            <Dialog open={isRemoteConfigOpen} onOpenChange={setIsRemoteConfigOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" data-testid="button-configure-remote">
+                  <i className="fas fa-cog mr-2"></i>
+                  Configure Remote MT5
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Configure Remote MT5 Connection</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="remote-host">Host/IP Address</Label>
+                    <Input
+                      id="remote-host"
+                      type="text"
+                      placeholder="Enter your external IP or domain"
+                      value={remoteHost}
+                      onChange={(e) => setRemoteHost(e.target.value)}
+                    />
                   </div>
-
-                  <FormField
-                    control={form.control}
-                    name="mode"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Account Type</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-account-mode">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="demo">Demo Account</SelectItem>
-                            <SelectItem value="live">Live Account</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
+                  <div>
+                    <Label htmlFor="remote-port">Port</Label>
+                    <Input
+                      id="remote-port"
+                      type="number"
+                      placeholder="8765"
+                      value={remotePort}
+                      onChange={(e) => setRemotePort(e.target.value)}
+                    />
+                  </div>
                   <div className="flex justify-between">
-                    <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                    <Button type="button" variant="outline" onClick={() => setIsRemoteConfigOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit" data-testid="button-submit-broker" disabled={connecting}>
-                      {connecting ? "Connecting..." : "Connect to MT5"}
+                    <Button onClick={configureRemoteConnection} disabled={connecting}>
+                      {connecting ? "Configuring..." : "Configure Connection"}
                     </Button>
                   </div>
-                </form>
-              </Form>
-            </DialogContent>
-          </Dialog>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button data-testid="button-add-broker" onClick={() => {
+                  form.reset(); // Reset form when opening dialog
+                  setIsCreateDialogOpen(true);
+                }}>
+                  <i className="fas fa-plug mr-2"></i>
+                  Connect MT5
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Connect to MT5</DialogTitle>
+                </DialogHeader>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="brokerId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Broker</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value} disabled>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-broker">
+                                <SelectValue placeholder="MT5" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="mt5">MT5</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="login"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Login/Account Number</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="text"
+                              placeholder="Enter MT5 account number"
+                              {...field}
+                              data-testid="input-login"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Password</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="password"
+                              placeholder="Enter MT5 password"
+                              {...field}
+                              data-testid="input-password"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="server"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Server</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="text"
+                              placeholder="e.g., MetaQuotes-Demo or your broker's server"
+                              {...field}
+                              data-testid="input-server"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="mode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Account Type</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-account-mode">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="demo">Demo Account</SelectItem>
+                              <SelectItem value="live">Live Account</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="bg-muted p-3 rounded-md">
+                      <p className="text-sm text-muted-foreground">
+                        <strong>Note:</strong> Make sure you have configured the remote MT5 connection first using the "Configure Remote MT5" button above, and that your MT5 bridge server is running on your home PC.
+                      </p>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" data-testid="button-submit-broker" disabled={connecting}>
+                        {connecting ? "Connecting..." : "Connect to MT5"}
+                      </Button>
+                    </div>
+                  </form>
+                </Form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         {/* Broker Status Cards */}
@@ -305,6 +473,10 @@ export default function Brokers() {
                     <Button variant="outline" size="sm" data-testid={`button-test-connection-${index}`} onClick={fetchAccountInfo} disabled={connecting}>
                       <i className="fas fa-plug mr-2"></i>
                       Test Connection
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => downloadMT5Bridge()} data-testid={`button-download-bridge-${index}`}>
+                      <i className="fas fa-download mr-2"></i>
+                      Download MT5 Bridge
                     </Button>
                   </div>
                 </div>
