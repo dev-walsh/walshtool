@@ -319,30 +319,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Accounts API
   app.get("/api/accounts", async (req, res) => {
     try {
-      const { brokerManager } = await import("./services/broker-manager");
-      const ctraderConnection = brokerManager.getBrokerConnection("ctrader");
+      const { ctraderIntegration } = await import("./services/ctrader-integration");
+      const ctraderAccounts = ctraderIntegration.getAllAccounts();
       
-      let accounts = [];
-      
-      // If cTrader is connected, show the actual cTrader account
-      if (ctraderConnection && ctraderConnection.status === "CONNECTED") {
-        const accountInfo = await brokerManager.getAccountInfo("ctrader");
-        if (accountInfo && accountInfo.accountId) {
-          accounts.push({
-            id: accountInfo.accountId,
-            accountNumber: accountInfo.accountId,
-            brokerId: 'ctrader',
-            mode: 'demo',
-            balance: accountInfo.balance.toString(),
-            equity: accountInfo.equity.toString(),
-            baseCurrency: accountInfo.currency,
-            isActive: true
-          });
-        }
-      } else {
-        // Show placeholder message when no broker is connected
-        accounts = [];
-      }
+      const accounts = ctraderAccounts
+        .filter(acc => acc.connected && acc.info)
+        .map(acc => ({
+          id: acc.accountId,
+          accountNumber: acc.info!.accountNumber,
+          brokerId: 'ctrader',
+          mode: acc.info!.isLive ? 'live' : 'demo',
+          balance: acc.info!.balance.toString(),
+          equity: acc.info!.equity.toString(),
+          baseCurrency: acc.info!.currency,
+          isActive: true,
+          brokerName: acc.info!.brokerName,
+          leverage: acc.info!.leverage
+        }));
 
       res.json(accounts);
     } catch (error) {
@@ -391,7 +384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // cTrader Connection API
   app.post("/api/brokers/ctrader/connect", async (req, res) => {
     try {
-      const { login, password, server } = req.body;
+      const { login, password, server, clientId, clientSecret } = req.body;
 
       if (!login || !password || !server) {
         return res.status(400).json({ 
@@ -400,17 +393,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { brokerManager } = await import("./services/broker-manager");
-      const isConnected = await brokerManager.connectBroker("ctrader", {
-        login,
-        password,
-        server
-      });
+      const { ctraderIntegration } = await import("./services/ctrader-integration");
+      const result = await ctraderIntegration.addAccount(login, password, server, clientId, clientSecret);
 
-      if (isConnected) {
-        res.json({ success: true, message: "Successfully connected to cTrader" });
+      if (result.success) {
+        res.json({ 
+          success: true, 
+          message: "Successfully connected to cTrader",
+          accountId: result.accountId
+        });
       } else {
-        res.status(400).json({ success: false, error: "Failed to connect to cTrader" });
+        res.status(400).json({ success: false, error: result.error || "Failed to connect to cTrader" });
       }
     } catch (error) {
       console.error("cTrader connection error:", error);
@@ -421,26 +414,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Add new endpoint for removing cTrader accounts
+  app.delete("/api/brokers/ctrader/accounts/:accountId", async (req, res) => {
+    try {
+      const { accountId } = req.params;
+      const { ctraderIntegration } = await import("./services/ctrader-integration");
+      
+      const success = await ctraderIntegration.removeAccount(accountId);
+      
+      if (success) {
+        res.json({ success: true, message: "Account removed successfully" });
+      } else {
+        res.status(400).json({ success: false, error: "Failed to remove account" });
+      }
+    } catch (error) {
+      console.error("Error removing cTrader account:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to remove account" 
+      });
+    }
+  });
+
   // cTrader Account Info API
   app.get("/api/brokers/ctrader/account", async (req, res) => {
     try {
-      const { brokerManager } = await import("./services/broker-manager");
-      const connection = brokerManager.getBrokerConnection("ctrader");
+      const { accountId } = req.query;
+      const { ctraderIntegration } = await import("./services/ctrader-integration");
       
-      if (!connection || connection.status !== "CONNECTED") {
+      if (!ctraderIntegration.hasConnectedAccounts()) {
         return res.status(400).json({ 
           success: false, 
-          error: "cTrader is not connected" 
+          error: "No cTrader accounts connected" 
         });
       }
 
-      const accountInfo = await brokerManager.getAccountInfo("ctrader");
-      res.json(accountInfo);
+      const accountInfo = await ctraderIntegration.getAccountInfo(accountId as string);
+      
+      if (accountInfo.success) {
+        res.json(accountInfo.account);
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          error: accountInfo.error 
+        });
+      }
     } catch (error) {
       console.error("cTrader account info error:", error);
       res.status(500).json({ 
         success: false, 
         error: error instanceof Error ? error.message : "Failed to get account info" 
+      });
+    }
+  });
+
+  // Get all cTrader accounts
+  app.get("/api/brokers/ctrader/accounts", async (req, res) => {
+    try {
+      const { ctraderIntegration } = await import("./services/ctrader-integration");
+      const accounts = ctraderIntegration.getAllAccounts();
+      res.json(accounts);
+    } catch (error) {
+      console.error("Error fetching cTrader accounts:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to fetch accounts" 
       });
     }
   });

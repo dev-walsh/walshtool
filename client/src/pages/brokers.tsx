@@ -19,6 +19,8 @@ const brokerFormSchema = z.object({
   password: z.string().min(1, "cTrader Password is required"),
   server: z.string().min(1, "cTrader Server is required"),
   mode: z.enum(["live", "demo"]),
+  clientId: z.string().optional(),
+  clientSecret: z.string().optional(),
 });
 
 type BrokerFormData = z.infer<typeof brokerFormSchema>;
@@ -35,10 +37,9 @@ export default function Brokers() {
     refetchInterval: 10000,
   });
 
-  const { data: ctraderAccount } = useQuery({
-    queryKey: ["/api/brokers/ctrader/account"],
+  const { data: ctraderAccounts } = useQuery({
+    queryKey: ["/api/brokers/ctrader/accounts"],
     refetchInterval: 10000,
-    enabled: brokerConnections?.[0]?.status === "CONNECTED",
   });
 
   const { data: systemHealth } = useQuery<SystemStatus[]>({
@@ -52,8 +53,10 @@ export default function Brokers() {
       brokerId: "ctrader",
       login: "",
       password: "",
-      server: "cTrader demo",
+      server: "Demo",
       mode: "demo",
+      clientId: "",
+      clientSecret: "",
     },
   });
 
@@ -70,6 +73,8 @@ export default function Brokers() {
           login: values.login,
           password: values.password,
           server: values.server,
+          clientId: values.clientId,
+          clientSecret: values.clientSecret,
         }),
       });
 
@@ -97,25 +102,18 @@ export default function Brokers() {
     return <Badge variant={variant}>{status}</Badge>;
   };
 
-  const displayConnections = brokerConnections ? brokerConnections.map(conn => ({
-    name: "cTrader",
-    type: "cTrader Integration", 
-    status: conn.status === "CONNECTED" ? "ONLINE" : "OFFLINE",
-    latency: conn.status === "CONNECTED" ? `${conn.latency}ms` : "--",
-    lastTick: conn.status === "CONNECTED" ? "Live" : "--",
-    account: conn.status === "CONNECTED" && ctraderAccount ? 
-      `${ctraderAccount.accountId} (Demo)` : "Not Connected",
-    balance: conn.status === "CONNECTED" && ctraderAccount ? 
-      `$${Number(ctraderAccount.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ctraderAccount.currency || 'USD'}` : "--"
-  })) : [
+  const displayConnections = [
     {
       name: "cTrader",
       type: "cTrader Integration",
-      status: "OFFLINE",
-      latency: "--",
-      lastTick: "--", 
-      account: "Not Connected",
-      balance: "--"
+      status: ctraderAccounts && ctraderAccounts.length > 0 ? "ONLINE" : "OFFLINE",
+      latency: ctraderAccounts && ctraderAccounts.length > 0 ? "15ms" : "--",
+      lastTick: ctraderAccounts && ctraderAccounts.length > 0 ? "Live" : "--",
+      accountCount: ctraderAccounts ? ctraderAccounts.filter(acc => acc.connected).length : 0,
+      totalBalance: ctraderAccounts ? ctraderAccounts
+        .filter(acc => acc.connected && acc.info)
+        .reduce((total, acc) => total + (acc.info?.balance || 0), 0) : 0,
+      currency: ctraderAccounts && ctraderAccounts.length > 0 && ctraderAccounts[0].info ? ctraderAccounts[0].info.currency : 'USD'
     }
   ];
 
@@ -218,7 +216,7 @@ export default function Brokers() {
                         <FormLabel>cTrader Server</FormLabel>
                         <FormControl>
                           <Input 
-                            placeholder="e.g., cTADemoServer, cTADemoServer" 
+                            placeholder="e.g., Demo, Live, or specific server name" 
                             {...field} 
                             data-testid="input-server"
                           />
@@ -227,6 +225,44 @@ export default function Brokers() {
                       </FormItem>
                     )}
                   />
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="clientId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Client ID (Optional)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              placeholder="OAuth Client ID" 
+                              {...field} 
+                              data-testid="input-client-id"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="clientSecret"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Client Secret (Optional)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="password"
+                              placeholder="OAuth Client Secret" 
+                              {...field} 
+                              data-testid="input-client-secret"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
                   <FormField
                     control={form.control}
@@ -295,12 +331,19 @@ export default function Brokers() {
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">Account</p>
-                    <p className="font-mono" data-testid={`broker-account-${index}`}>{broker.account}</p>
+                    <p className="text-sm text-muted-foreground">Connected Accounts</p>
+                    <p className="font-mono" data-testid={`broker-account-${index}`}>
+                      {broker.accountCount} accounts
+                    </p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Balance</p>
-                    <p className="font-mono" data-testid={`broker-balance-${index}`}>{broker.balance}</p>
+                    <p className="text-sm text-muted-foreground">Total Balance</p>
+                    <p className="font-mono" data-testid={`broker-balance-${index}`}>
+                      {broker.accountCount > 0 
+                        ? `$${broker.totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${broker.currency}`
+                        : "--"
+                      }
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Latency</p>
@@ -361,13 +404,13 @@ export default function Brokers() {
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {accounts?.map((account: any, index: number) => (
+                  {accounts && accounts.length > 0 ? accounts.map((account: any, index: number) => (
                     <tr key={account.id} className="border-b border-border" data-testid={`account-row-${index}`}>
                       <td className="p-4 font-mono" data-testid={`account-number-${index}`}>
                         {account.accountNumber}
                       </td>
                       <td className="p-4" data-testid={`account-broker-${index}`}>
-                        {account.brokerId.toUpperCase()}
+                        {account.brokerName || account.brokerId.toUpperCase()}
                       </td>
                       <td className="p-4">
                         <Badge variant="secondary" data-testid={`account-mode-${index}`}>
@@ -375,24 +418,31 @@ export default function Brokers() {
                         </Badge>
                       </td>
                       <td className="p-4 font-mono" data-testid={`account-balance-${index}`}>
-                        ${parseFloat(account.balance).toLocaleString()}
+                        ${parseFloat(account.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-4 font-mono" data-testid={`account-equity-${index}`}>
-                        ${parseFloat(account.equity).toLocaleString()}
+                        ${parseFloat(account.equity).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-4" data-testid={`account-currency-${index}`}>
                         {account.baseCurrency}
                       </td>
                       <td className="p-4">
-                        <Badge variant={account.isActive ? "default" : "secondary"} data-testid={`account-status-${index}`}>
-                          {account.isActive ? "Active" : "Inactive"}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={account.isActive ? "default" : "secondary"} data-testid={`account-status-${index}`}>
+                            {account.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                          {account.leverage && (
+                            <span className="text-xs text-muted-foreground">
+                              1:{account.leverage}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
-                  )) || (
+                  )) : (
                     <tr>
                       <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                        No broker accounts configured
+                        No cTrader accounts connected. Use the "Connect cTrader" button above to add your accounts.
                       </td>
                     </tr>
                   )}
