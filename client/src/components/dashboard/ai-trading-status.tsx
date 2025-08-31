@@ -11,9 +11,15 @@ export function AITradingStatus() {
     refetchInterval: 5000,
   });
 
-  const { data: mt5Status } = useQuery({
-    queryKey: ["/api/mt5/status"],
+  const { data: ctraderStatus } = useQuery({
+    queryKey: ["/api/brokers/connections"],
     refetchInterval: 10000,
+  });
+
+  const { data: ctraderAccount } = useQuery({
+    queryKey: ["/api/brokers/ctrader/account"],
+    refetchInterval: 10000,
+    enabled: ctraderStatus?.[0]?.status === "CONNECTED",
   });
 
   return (
@@ -30,16 +36,19 @@ export function AITradingStatus() {
       <CardContent>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">MT5 Connection</span>
-            <Badge variant={mt5Status?.mt5Connected ? "default" : "destructive"}>
-              {mt5Status?.mt5Connected ? "Connected" : "Disconnected"}
+            <span className="text-sm text-muted-foreground">cTrader Connection</span>
+            <Badge 
+              variant={ctraderStatus?.[0]?.status === "CONNECTED" ? "default" : "destructive"}
+              className={ctraderStatus?.[0]?.status === "CONNECTED" ? "bg-green-600 hover:bg-green-700" : ""}
+            >
+              {ctraderStatus?.[0]?.status === "CONNECTED" ? "CONNECTED" : "DISCONNECTED"}
             </Badge>
           </div>
           
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Account Mode</span>
-            <Badge variant={mt5Status?.isDemoMode ? "secondary" : "destructive"}>
-              {mt5Status?.isDemoMode ? "Demo" : "Live"}
+            <Badge variant="secondary">
+              Demo
             </Badge>
           </div>
           
@@ -50,19 +59,22 @@ export function AITradingStatus() {
             </Badge>
           </div>
 
-          {mt5Status?.accountInfo && (
+          {ctraderStatus?.[0]?.status === "CONNECTED" && ctraderAccount && (
             <div className="pt-2 border-t">
               <div className="text-xs text-muted-foreground">Account Balance</div>
               <div className="text-lg font-semibold">
-                ${mt5Status.accountInfo.balance?.toFixed(2)} {mt5Status.accountInfo.currency}
+                ${ctraderAccount.balance?.toFixed(2)} {ctraderAccount.currency}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Demo Account • Equity: ${ctraderAccount.equity?.toFixed(2)}
               </div>
             </div>
           )}
           
-          {!mt5Status?.mt5Connected && (
+          {ctraderStatus?.[0]?.status !== "CONNECTED" && (
             <div className="flex items-center text-amber-600 text-xs">
               <AlertTriangle className="mr-1 h-3 w-3" />
-              Install MetaTrader 5 and ensure it's running
+              Connect to cTrader in Broker Connections
             </div>
           )}
         </div>

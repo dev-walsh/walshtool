@@ -106,9 +106,9 @@ class CTraderIntegration {
       const mockAccount: CTraderAccountInfo = {
         accountId: this.credentials?.login || 'demo_account',
         balance: 10000,
-        equity: 10000 + Math.random() * 1000,
-        margin: Math.random() * 500,
-        freeMargin: 9500 + Math.random() * 500,
+        equity: 10000,
+        margin: 0,
+        freeMargin: 10000,
         currency: 'USD',
         leverage: 100
       };

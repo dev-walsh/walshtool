@@ -113,7 +113,6 @@ class BrokerManager {
             latency: Math.floor(Math.random() * 50) + 10
           });
           
-          console.log(`Connected to cTrader demo account: ${credentials.login}`);
           return true;
         } else {
           this.connections.set(brokerId, {
@@ -198,8 +197,6 @@ class BrokerManager {
         return this.executeWebSocketOrder(config, order);
       case "FIX":
         return this.executeFixOrder(config, order);
-      case "CTRADER":
-        return this.executeCTraderOrder(config, order);
       default:
         throw new Error(`Unsupported broker type: ${config.type}`);
     }
@@ -247,37 +244,7 @@ class BrokerManager {
     };
   }
 
-  private async executeCTraderOrder(config: BrokerConfig, order: any): Promise<any> {
-    // Execute cTrader order via integration
-    const { ctraderIntegration } = await import('./ctrader-integration');
-    
-    try {
-      const result = await ctraderIntegration.placeOrder(
-        order.symbol,
-        order.side,
-        order.quantity,
-        order.price,
-        order.stopLoss,
-        order.takeProfit,
-        order.comment
-      );
-
-      if (result.success) {
-        return {
-          orderId: result.order.orderId,
-          status: "FILLED",
-          executedPrice: result.order.executedPrice,
-          executedQuantity: result.order.executedQuantity,
-          executionTime: new Date(),
-          commission: result.order.commission || 0
-        };
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (error) {
-      throw new Error(`cTrader order execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
+  
 
   getBrokerConfig(brokerId: string): BrokerConfig | undefined {
     return this.configs.get(brokerId);
@@ -301,7 +268,17 @@ class BrokerManager {
       throw new Error(`Broker ${brokerId} is not connected`);
     }
 
-    // Mock account info
+    if (brokerId === "ctrader") {
+      const { ctraderIntegration } = await import('./ctrader-integration');
+      const result = await ctraderIntegration.getAccountInfo();
+      if (result.success) {
+        return result.account;
+      } else {
+        throw new Error(result.error);
+      }
+    }
+
+    // Mock account info for other brokers
     return {
       accountId: `${brokerId}-account`,
       balance: 50000 + Math.random() * 10000,
