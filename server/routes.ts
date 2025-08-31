@@ -1560,9 +1560,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unrealizedPnL: unrealizedPnL.toString(),
           });
 
-          // Send notification for significant P&L changes
+          // Send notification for significant P&L changes (reduced frequency)
           const pnlChange = Math.abs(unrealizedPnL - previousPnL);
-          if (pnlChange > 1000) { // Notify for changes > $1000
+          if (pnlChange > 10000) { // Notify for changes > $10,000 (reduced from $1000)
             const changeDirection = unrealizedPnL > previousPnL ? "📈 PROFIT" : "📉 LOSS";
             await notificationManager.sendAlert("INFO", 
               `${changeDirection}: ${position.symbol} P&L changed by $${pnlChange.toFixed(2)} (Total: $${unrealizedPnL.toFixed(2)})`,
