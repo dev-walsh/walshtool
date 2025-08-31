@@ -4,10 +4,9 @@ export const TRADING_PAIRS = [
 ] as const;
 
 export const BROKERS = [
-  { id: "oanda", name: "OANDA", type: "REST API" },
-  { id: "mt5", name: "MetaTrader 5", type: "Bridge Connection" },
-  { id: "ibkr", name: "Interactive Brokers", type: "TWS Gateway" },
   { id: "ctrader", name: "cTrader", type: "Open API" },
+  { id: "oanda", name: "OANDA", type: "REST API" },
+  { id: "ibkr", name: "Interactive Brokers", type: "TWS Gateway" },
 ] as const;
 
 export const ACCOUNT_MODES = [

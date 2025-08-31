@@ -5,12 +5,15 @@ import { storage } from "../storage";
 interface BrokerConfig {
   id: string;
   name: string;
-  type: "REST" | "FIX" | "WEBSOCKET";
+  type: "REST" | "FIX" | "WEBSOCKET" | "MT5";
   apiUrl: string;
   credentials: {
     apiKey?: string;
     apiSecret?: string;
     accountId?: string;
+    login?: string;
+    password?: string;
+    server?: string;
     environment?: "demo" | "live";
   };
   symbols: string[];
@@ -40,73 +43,19 @@ class BrokerManager {
   }
 
   private initializeBrokers() {
-    // OANDA Configuration
-    this.configs.set("oanda", {
-      id: "oanda",
-      name: "OANDA",
-      type: "REST",
-      apiUrl: "https://api-fxtrade.oanda.com",
-      credentials: {
-        environment: "demo"
-      },
-      symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"],
-      features: {
-        supportsBacktesting: true,
-        supportsLiveTrading: true,
-        supportsHistoricalData: true,
-        maxPositions: 20,
-        minPositionSize: 1000
-      }
-    });
-
-    // MetaTrader 5 Configuration
-    this.configs.set("mt5", {
-      id: "mt5",
-      name: "MetaTrader 5",
-      type: "WEBSOCKET",
-      apiUrl: "ws://localhost:8080/mt5",
-      credentials: {
-        environment: "demo"
-      },
-      symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY"],
-      features: {
-        supportsBacktesting: true,
-        supportsLiveTrading: true,
-        supportsHistoricalData: true,
-        maxPositions: 50,
-        minPositionSize: 100
-      }
-    });
-
-    // Interactive Brokers Configuration
-    this.configs.set("ibkr", {
-      id: "ibkr",
-      name: "Interactive Brokers",
-      type: "REST",
-      apiUrl: "https://localhost:5000/v1/api",
-      credentials: {
-        environment: "demo"
-      },
-      symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"],
-      features: {
-        supportsBacktesting: false,
-        supportsLiveTrading: true,
-        supportsHistoricalData: true,
-        maxPositions: 100,
-        minPositionSize: 25000
-      }
-    });
-
     // cTrader Configuration
     this.configs.set("ctrader", {
       id: "ctrader",
       name: "cTrader",
       type: "REST",
-      apiUrl: "https://demo-api.ctrader.com",
+      apiUrl: "https://demo.ctraderapi.com",
       credentials: {
+        login: "",
+        password: "",
+        server: "",
         environment: "demo"
       },
-      symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"],
+      symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY"],
       features: {
         supportsBacktesting: true,
         supportsLiveTrading: true,
@@ -116,15 +65,13 @@ class BrokerManager {
       }
     });
 
-    // Initialize mock connections
-    for (const [brokerId, config] of this.configs) {
-      this.connections.set(brokerId, {
-        brokerId,
-        status: "CONNECTED",
-        lastPing: new Date(),
-        latency: Math.floor(Math.random() * 50) + 10
-      });
-    }
+    // Initialize cTrader connection as disconnected initially
+    this.connections.set("ctrader", {
+      brokerId: "ctrader",
+      status: "DISCONNECTED",
+      lastPing: new Date(),
+      latency: 0
+    });
   }
 
   async connectBroker(brokerId: string, credentials: any): Promise<boolean> {
@@ -141,10 +88,46 @@ class BrokerManager {
     });
 
     try {
-      // Simulate connection process
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (brokerId === "ctrader") {
+        // Update cTrader config with user credentials
+        config.credentials = {
+          ...config.credentials,
+          login: credentials.login,
+          password: credentials.password,
+          server: credentials.server
+        };
 
-      // Mock connection validation
+        // Try to connect to cTrader using the integration service
+        const { ctraderIntegration } = await import('./ctrader-integration');
+        const isConnected = await ctraderIntegration.connectWithCredentials(
+          credentials.login,
+          credentials.password,
+          credentials.server
+        );
+
+        if (isConnected) {
+          this.connections.set(brokerId, {
+            brokerId,
+            status: "CONNECTED",
+            lastPing: new Date(),
+            latency: Math.floor(Math.random() * 50) + 10
+          });
+          
+          console.log(`Connected to cTrader demo account: ${credentials.login}`);
+          return true;
+        } else {
+          this.connections.set(brokerId, {
+            brokerId,
+            status: "ERROR",
+            lastPing: new Date(),
+            latency: 0,
+            errorMessage: "Failed to connect to cTrader. Check credentials and API access."
+          });
+          return false;
+        }
+      }
+
+      // For other broker types (currently none)
       const isValid = this.validateCredentials(brokerId, credentials);
       
       if (isValid) {
@@ -215,6 +198,8 @@ class BrokerManager {
         return this.executeWebSocketOrder(config, order);
       case "FIX":
         return this.executeFixOrder(config, order);
+      case "CTRADER":
+        return this.executeCTraderOrder(config, order);
       default:
         throw new Error(`Unsupported broker type: ${config.type}`);
     }
@@ -260,6 +245,38 @@ class BrokerManager {
       executionTime: new Date(),
       commission: 3
     };
+  }
+
+  private async executeCTraderOrder(config: BrokerConfig, order: any): Promise<any> {
+    // Execute cTrader order via integration
+    const { ctraderIntegration } = await import('./ctrader-integration');
+    
+    try {
+      const result = await ctraderIntegration.placeOrder(
+        order.symbol,
+        order.side,
+        order.quantity,
+        order.price,
+        order.stopLoss,
+        order.takeProfit,
+        order.comment
+      );
+
+      if (result.success) {
+        return {
+          orderId: result.order.orderId,
+          status: "FILLED",
+          executedPrice: result.order.executedPrice,
+          executedQuantity: result.order.executedQuantity,
+          executionTime: new Date(),
+          commission: result.order.commission || 0
+        };
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      throw new Error(`cTrader order execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   getBrokerConfig(brokerId: string): BrokerConfig | undefined {

@@ -15,10 +15,10 @@ import { type Account, type SystemStatus } from "@shared/schema";
 
 const brokerFormSchema = z.object({
   brokerId: z.string().min(1, "Broker ID is required"),
-  accountNumber: z.string().min(1, "Account number is required"),
-  mode: z.enum(["live", "paper", "backtest"]),
-  baseCurrency: z.string().default("USD"),
-  leverage: z.string().default("100"),
+  login: z.string().min(1, "cTrader Login is required"),
+  password: z.string().min(1, "cTrader Password is required"),
+  server: z.string().min(1, "cTrader Server is required"),
+  mode: z.enum(["live", "demo"]),
 });
 
 type BrokerFormData = z.infer<typeof brokerFormSchema>;
@@ -43,48 +43,58 @@ export default function Brokers() {
   const form = useForm<BrokerFormData>({
     resolver: zodResolver(brokerFormSchema),
     defaultValues: {
-      brokerId: "",
-      accountNumber: "",
-      mode: "paper",
-      baseCurrency: "USD",
-      leverage: "100",
+      brokerId: "ctrader",
+      login: "",
+      password: "",
+      server: "cTrader demo",
+      mode: "demo",
     },
   });
 
-  const onSubmit = async (data: BrokerFormData) => {
-    // This would create a new broker account
-    console.log("Creating broker account:", data);
-    setIsCreateDialogOpen(false);
+  const onSubmit = async (values: z.infer<typeof brokerFormSchema>) => {
+    try {
+      console.log("Submitting cTrader connection with values:", values);
+
+      const response = await fetch("/api/brokers/ctrader/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          login: values.login,
+          password: values.password,
+          server: values.server,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        console.log("Successfully connected to cTrader");
+        setIsCreateDialogOpen(false);
+        // Refresh the page data
+        window.location.reload();
+      } else {
+        console.error("Failed to connect to cTrader:", result.error || result);
+        // You might want to show an error message to the user here
+        alert(`Connection failed: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error("Connection error:", error);
+      alert(`Connection error: ${error.message || 'Network error'}`);
+    }
   };
 
   const getStatusBadge = (status: string) => {
-    const variant = status === "ONLINE" ? "default" : 
+    const variant = status === "ONLINE" ? "default" :
                    status === "WARNING" ? "secondary" : "destructive";
     return <Badge variant={variant}>{status}</Badge>;
   };
 
   const displayConnections = brokerConnections || [
     {
-      name: "OANDA (Demo)",
-      type: "REST API",
-      status: "ONLINE",
-      latency: "23ms",
-      lastTick: "14:35:42",
-      account: "101-004-12345-001",
-      balance: "$50,000.00"
-    },
-    {
-      name: "MT5 Bridge",
-      type: "Bridge Connection",
-      status: "WARNING",
-      latency: "--",
-      lastTick: "14:33:15",
-      account: "12345678",
-      balance: "$100,000.00"
-    },
-    {
-      name: "Interactive Brokers",
-      type: "TWS Gateway",
+      name: "cTrader",
+      type: "cTrader Integration",
       status: "OFFLINE",
       latency: "--",
       lastTick: "--",
@@ -107,24 +117,24 @@ export default function Brokers() {
   return (
     <>
       <Header title="Brokers" description="Manage broker connections and trading accounts" />
-      
+
       <div className="p-6 space-y-6">
         <div className="flex justify-between items-center">
           <div>
             <h3 className="text-lg font-semibold">Broker Connections</h3>
             <p className="text-muted-foreground">Monitor and configure your broker integrations</p>
           </div>
-          
+
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button data-testid="button-add-broker">
-                <i className="fas fa-plus mr-2"></i>
-                Add Broker
+                <i className="fas fa-plug mr-2"></i>
+                Connect cTrader
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Add Broker Account</DialogTitle>
+                <DialogTitle>Connect to cTrader</DialogTitle>
               </DialogHeader>
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -134,16 +144,13 @@ export default function Brokers() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Broker</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled>
                           <FormControl>
                             <SelectTrigger data-testid="select-broker">
-                              <SelectValue placeholder="Select a broker" />
+                              <SelectValue placeholder="cTrader" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="oanda">OANDA</SelectItem>
-                            <SelectItem value="mt5">MetaTrader 5</SelectItem>
-                            <SelectItem value="ibkr">Interactive Brokers</SelectItem>
                             <SelectItem value="ctrader">cTrader</SelectItem>
                           </SelectContent>
                         </Select>
@@ -151,27 +158,66 @@ export default function Brokers() {
                       </FormItem>
                     )}
                   />
-                  
+
                   <FormField
                     control={form.control}
-                    name="accountNumber"
+                    name="login"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Account Number</FormLabel>
+                        <FormLabel>cTrader Login</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter account number" {...field} data-testid="input-account-number" />
+                          <Input 
+                            placeholder="Your cTrader login" 
+                            {...field} 
+                            data-testid="input-login"
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  
+                  <FormField
+                    control={form.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>cTrader Password</FormLabel>
+                        <FormControl>
+                          <Input 
+                            type="password" 
+                            placeholder="Your cTrader password" 
+                            {...field} 
+                            data-testid="input-password"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="server"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>cTrader Server</FormLabel>
+                        <FormControl>
+                          <Input 
+                            placeholder="e.g., cTADemoServer, cTADemoServer" 
+                            {...field} 
+                            data-testid="input-server"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                   <FormField
                     control={form.control}
                     name="mode"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Account Mode</FormLabel>
+                        <FormLabel>Account Type</FormLabel>
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
                             <SelectTrigger data-testid="select-account-mode">
@@ -179,52 +225,21 @@ export default function Brokers() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="paper">Paper Trading</SelectItem>
-                            <SelectItem value="live">Live Trading</SelectItem>
-                            <SelectItem value="backtest">Backtesting Only</SelectItem>
+                            <SelectItem value="demo">Demo Account</SelectItem>
+                            <SelectItem value="live">Live Account</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="baseCurrency"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Base Currency</FormLabel>
-                          <FormControl>
-                            <Input {...field} data-testid="input-base-currency" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={form.control}
-                      name="leverage"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Leverage</FormLabel>
-                          <FormControl>
-                            <Input {...field} data-testid="input-leverage" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                  
+
                   <div className="flex justify-between">
                     <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                       Cancel
                     </Button>
                     <Button type="submit" data-testid="button-submit-broker">
-                      Add Account
+                      Connect to cTrader
                     </Button>
                   </div>
                 </form>
@@ -282,7 +297,7 @@ export default function Brokers() {
                     <p className="font-mono" data-testid={`broker-last-tick-${index}`}>{broker.lastTick}</p>
                   </div>
                 </div>
-                
+
                 {broker.status === "WARNING" && (
                   <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
                     <div className="flex items-center space-x-2">
@@ -291,7 +306,7 @@ export default function Brokers() {
                     </div>
                   </div>
                 )}
-                
+
                 {broker.status === "OFFLINE" && (
                   <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
                     <div className="flex items-center justify-between">

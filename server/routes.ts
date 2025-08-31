@@ -12,6 +12,10 @@ import { authService } from "./services/auth";
 import { authenticateToken, requireRole } from "./middleware/auth";
 import { mt5Integration } from "./services/mt5-integration";
 import { aiTradingEngine } from "./services/ai-trading-engine";
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config();
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -19,6 +23,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Import services
   const { telegramBot } = await import("./services/telegram-bot");
   const { notificationManager } = await import("./services/notification-manager");
+  const { brokerManager } = await import("./services/broker-manager");
 
   // WebSocket server for real-time updates
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
@@ -346,75 +351,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Broker connections API
-  app.get("/api/brokers/connections", async (req, res) => {
-    try {
-      const brokerConnections = [
-        {
-          name: "OANDA (Demo)",
-          type: "REST API",
-          status: "ONLINE",
-          latency: "23ms",
-          lastTick: new Date().toLocaleTimeString('en-US', { hour12: false }),
-          account: "101-004-12345-001",
-          balance: "$50,000.00"
-        },
-        {
-          name: "MT5 Bridge",
-          type: "Bridge Connection", 
-          status: "WARNING",
-          latency: "45ms",
-          lastTick: new Date(Date.now() - 120000).toLocaleTimeString('en-US', { hour12: false }),
-          account: "12345678",
-          balance: "$100,000.00"
-        },
-        {
-          name: "Interactive Brokers",
-          type: "TWS Gateway",
-          status: "OFFLINE",
-          latency: "--",
-          lastTick: "--",
-          account: "Not Connected",
-          balance: "--"
-        }
-      ];
+  app.get("/api/brokers/connections", (req, res) => {
+    const connections = brokerManager.getAllConnections();
+    res.json(connections);
+  });
 
-      res.json(brokerConnections);
+  app.post("/api/brokers/connect", async (req, res) => {
+    try {
+      const { brokerId, credentials } = req.body;
+
+      if (!brokerId || !credentials) {
+        return res.status(400).json({ error: "Missing broker ID or credentials" });
+      }
+
+      const connected = await brokerManager.connectBroker(brokerId, credentials);
+
+      if (connected) {
+        res.json({ success: true, message: "Successfully connected to broker" });
+      } else {
+        res.status(400).json({ error: "Failed to connect to broker" });
+      }
     } catch (error) {
-      console.error("Failed to fetch broker connections:", error);
-      res.status(500).json({ error: "Failed to fetch broker connections" });
+      console.error("Broker connection error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Connection failed" });
     }
   });
 
-  app.post("/api/brokers/test-connection/:index", async (req, res) => {
+  // cTrader Connection API
+  app.post("/api/brokers/ctrader/connect", async (req, res) => {
     try {
-      const { index } = req.params;
+      const { login, password, server } = req.body;
 
-      // Simulate connection test
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!login || !password || !server) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Missing required fields: login, password, server" 
+        });
+      }
 
-      res.json({ 
-        success: true, 
-        message: "Connection test successful",
-        latency: Math.floor(Math.random() * 50) + 10 + "ms"
+      const { brokerManager } = await import("./services/broker-manager");
+      const isConnected = await brokerManager.connectBroker("ctrader", {
+        login,
+        password,
+        server
       });
+
+      if (isConnected) {
+        res.json({ success: true, message: "Successfully connected to cTrader" });
+      } else {
+        res.status(400).json({ success: false, error: "Failed to connect to cTrader" });
+      }
     } catch (error) {
-      res.status(500).json({ error: "Connection test failed" });
+      console.error("cTrader connection error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Connection failed" 
+      });
     }
   });
 
-  app.post("/api/brokers/reconnect/:index", async (req, res) => {
+  // Routes for specific brokers (e.g., MT5)
+  app.post("/api/brokers/mt5/disconnect", async (req, res) => {
     try {
-      const { index } = req.params;
-
-      // Simulate reconnection
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      res.json({ 
-        success: true, 
-        message: "Reconnection successful"
-      });
+      await mt5Integration.disconnect();
+      res.json({ success: true, message: "Disconnected from MT5 server" });
     } catch (error) {
-      res.status(500).json({ error: "Reconnection failed" });
+      console.error("MT5 Disconnection Error:", error);
+      res.status(500).json({ error: error.message || "An unexpected error occurred during MT5 disconnection" });
+    }
+  });
+
+  app.post("/api/brokers/mt5/login", async (req, res) => {
+    try {
+      const { login, password, server } = req.body;
+
+      if (!login || !password || !server) {
+        return res.status(400).json({ error: "Login, password, and server are required for MT5 login" });
+      }
+
+      // Attempt to log in to the MT5 server
+      const loginResult = await mt5Integration.loginUser(login, password, server);
+
+      if (loginResult.success) {
+        res.json({ success: true, message: "Logged in to MT5 server successfully", data: loginResult.data });
+      } else {
+        res.status(401).json({ success: false, error: "MT5 login failed", details: loginResult.error });
+      }
+    } catch (error) {
+      console.error("MT5 Login Error:", error);
+      res.status(500).json({ error: error.message || "An unexpected error occurred during MT5 login" });
     }
   });
 
