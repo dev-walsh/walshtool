@@ -326,8 +326,6 @@ class SignalEngine {
   }
 
   async generateSignals(symbols: string[]): Promise<void> {
-    console.log("Generating signals for symbols:", symbols);
-    
     for (const symbol of symbols) {
       let marketData = marketDataService.getLatestPrice(symbol);
       
@@ -356,7 +354,6 @@ class SignalEngine {
           if (signal) {
             symbolSignals.push(signal);
             this.signalHistory.push(signal);
-            console.log(`Generated signal: ${signal.side} ${signal.symbol} (${signal.strength}% strength)`);
           }
         } catch (error) {
           console.error(`Error generating signal from ${provider.name}:`, error);
@@ -371,8 +368,6 @@ class SignalEngine {
       const allValidSignals = [...validExistingSignals, ...symbolSignals];
       this.activeSignals.set(symbol, allValidSignals);
     }
-    
-    console.log(`Total active signals: ${this.getAllActiveSignals().length}`);
   }
 
   private generateMockHistoricalData(symbol: string, bars: number): any[] {
