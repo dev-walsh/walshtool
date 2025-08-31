@@ -110,9 +110,10 @@ class BrokerManager {
             brokerId,
             status: "CONNECTED",
             lastPing: new Date(),
-            latency: Math.floor(Math.random() * 50) + 10
+            latency: Math.floor(Math.random() * 50) + 15
           });
           
+          console.log(`✅ cTrader broker connection established for: ${credentials.login}`);
           return true;
         } else {
           this.connections.set(brokerId, {
@@ -120,8 +121,9 @@ class BrokerManager {
             status: "ERROR",
             lastPing: new Date(),
             latency: 0,
-            errorMessage: "Failed to connect to cTrader. Check credentials and API access."
+            errorMessage: "Failed to connect to cTrader. Check credentials and server details."
           });
+          console.log(`❌ cTrader broker connection failed for: ${credentials.login}`);
           return false;
         }
       }
