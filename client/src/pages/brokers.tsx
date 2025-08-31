@@ -35,6 +35,12 @@ export default function Brokers() {
     refetchInterval: 10000,
   });
 
+  const { data: ctraderAccount } = useQuery({
+    queryKey: ["/api/brokers/ctrader/account"],
+    refetchInterval: 10000,
+    enabled: brokerConnections?.[0]?.status === "CONNECTED",
+  });
+
   const { data: systemHealth } = useQuery<SystemStatus[]>({
     queryKey: ["/api/system/status"],
     refetchInterval: 5000,
@@ -91,13 +97,23 @@ export default function Brokers() {
     return <Badge variant={variant}>{status}</Badge>;
   };
 
-  const displayConnections = brokerConnections || [
+  const displayConnections = brokerConnections ? brokerConnections.map(conn => ({
+    name: "cTrader",
+    type: "cTrader Integration", 
+    status: conn.status === "CONNECTED" ? "ONLINE" : "OFFLINE",
+    latency: conn.status === "CONNECTED" ? `${conn.latency}ms` : "--",
+    lastTick: conn.status === "CONNECTED" ? "Live" : "--",
+    account: conn.status === "CONNECTED" && ctraderAccount ? 
+      `${ctraderAccount.accountId} (Demo)` : "Not Connected",
+    balance: conn.status === "CONNECTED" && ctraderAccount ? 
+      `$${Number(ctraderAccount.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ctraderAccount.currency || 'USD'}` : "--"
+  })) : [
     {
       name: "cTrader",
       type: "cTrader Integration",
       status: "OFFLINE",
       latency: "--",
-      lastTick: "--",
+      lastTick: "--", 
       account: "Not Connected",
       balance: "--"
     }

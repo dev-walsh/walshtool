@@ -410,6 +410,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // cTrader Account Info API
+  app.get("/api/brokers/ctrader/account", async (req, res) => {
+    try {
+      const { brokerManager } = await import("./services/broker-manager");
+      const connection = brokerManager.getBrokerConnection("ctrader");
+      
+      if (!connection || connection.status !== "CONNECTED") {
+        return res.status(400).json({ 
+          success: false, 
+          error: "cTrader is not connected" 
+        });
+      }
+
+      const accountInfo = await brokerManager.getAccountInfo("ctrader");
+      res.json(accountInfo);
+    } catch (error) {
+      console.error("cTrader account info error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to get account info" 
+      });
+    }
+  });
+
   // Routes for specific brokers (e.g., MT5)
   app.post("/api/brokers/mt5/disconnect", async (req, res) => {
     try {

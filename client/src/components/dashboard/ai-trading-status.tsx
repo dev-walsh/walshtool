@@ -39,7 +39,7 @@ export function AITradingStatus() {
             <span className="text-sm text-muted-foreground">cTrader Connection</span>
             <Badge 
               variant={ctraderStatus?.[0]?.status === "CONNECTED" ? "default" : "destructive"}
-              className={ctraderStatus?.[0]?.status === "CONNECTED" ? "bg-green-600 hover:bg-green-700" : ""}
+              className={ctraderStatus?.[0]?.status === "CONNECTED" ? "bg-green-600 hover:bg-green-700 text-white" : "bg-red-600 text-white"}
             >
               {ctraderStatus?.[0]?.status === "CONNECTED" ? "CONNECTED" : "DISCONNECTED"}
             </Badge>
@@ -47,8 +47,8 @@ export function AITradingStatus() {
           
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Account Mode</span>
-            <Badge variant={ctraderAccount?.isDemoMode !== false ? "secondary" : "destructive"}>
-              {ctraderAccount?.isDemoMode !== false ? "Demo" : "Live"}
+            <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+              Demo
             </Badge>
           </div>
           
@@ -63,10 +63,10 @@ export function AITradingStatus() {
             <div className="pt-2 border-t">
               <div className="text-xs text-muted-foreground">Account Balance</div>
               <div className="text-lg font-semibold">
-                ${ctraderAccount.balance?.toFixed(2)} {ctraderAccount.currency}
+                ${Number(ctraderAccount.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ctraderAccount.currency || 'USD'}
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                Demo Account • Equity: ${ctraderAccount.equity?.toFixed(2)}
+                Demo Account • Equity: ${Number(ctraderAccount.equity || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
           )}
