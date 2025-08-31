@@ -319,21 +319,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Accounts API
   app.get("/api/accounts", async (req, res) => {
     try {
-      const accounts = await storage.getAccounts();
+      const { brokerManager } = await import("./services/broker-manager");
+      const ctraderConnection = brokerManager.getBrokerConnection("ctrader");
+      
+      let accounts = [];
+      
+      // If cTrader is connected, show the actual cTrader account
+      if (ctraderConnection && ctraderConnection.status === "CONNECTED") {
+        const accountInfo = await brokerManager.getAccountInfo("ctrader");
+        if (accountInfo && accountInfo.accountId) {
+          accounts.push({
+            id: accountInfo.accountId,
+            accountNumber: accountInfo.accountId,
+            brokerId: 'ctrader',
+            mode: 'demo',
+            balance: accountInfo.balance.toString(),
+            equity: accountInfo.equity.toString(),
+            baseCurrency: accountInfo.currency,
+            isActive: true
+          });
+        }
+      } else {
+        // Show placeholder message when no broker is connected
+        accounts = [];
+      }
 
-      // Ensure accounts have all required fields for the brokers page
-      const formattedAccounts = accounts.map(account => ({
-        ...account,
-        brokerId: account.brokerId || 'oanda',
-        accountNumber: account.accountNumber || account.id,
-        mode: account.mode || 'paper',
-        balance: account.balance || '50000.00',
-        equity: account.equity || '52350.75',
-        baseCurrency: account.baseCurrency || 'USD',
-        isActive: account.isActive !== undefined ? account.isActive : true
-      }));
-
-      res.json(formattedAccounts);
+      res.json(accounts);
     } catch (error) {
       console.error("Failed to fetch accounts:", error);
       res.status(500).json({ error: "Failed to fetch accounts" });

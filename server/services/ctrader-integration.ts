@@ -101,18 +101,16 @@ class CTraderIntegration {
         return { success: false, error: 'Not authenticated' };
       }
 
-      // For demo purposes, return mock data with realistic balance
+      // For demo purposes, return consistent mock data
       // In real implementation, call the actual API
-      const baseBalance = 10000; // More realistic demo balance
-      const variation = Math.random() * 2000 - 1000; // +/- $1000 variation
-      const currentBalance = Math.max(baseBalance + variation, 1000);
+      const demoBalance = 50000.00; // Consistent demo balance
       
       const mockAccount: CTraderAccountInfo & { isDemoMode: boolean } = {
         accountId: this.credentials?.login || 'demo_account',
-        balance: Math.round(currentBalance * 100) / 100,
-        equity: Math.round((currentBalance + (Math.random() * 500 - 250)) * 100) / 100,
-        margin: Math.round(Math.random() * 1000 * 100) / 100,
-        freeMargin: Math.round((currentBalance - Math.random() * 1000) * 100) / 100,
+        balance: demoBalance,
+        equity: demoBalance + 2350.75, // Small equity variation
+        margin: 1250.50,
+        freeMargin: demoBalance - 1250.50,
         currency: 'USD',
         leverage: 100,
         isDemoMode: true
